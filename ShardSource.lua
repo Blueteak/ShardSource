@@ -82,7 +82,9 @@ f:SetScript("OnEvent", function(self, event, ...)
     -- Trading Healthstone
     elseif event == "TRADE_SHOW" then
         tradeTarget = UnitName("target")
-        print("Trade opened with "..tradeTarget)
+        if tradeTarget then
+            print("Trade opened with "..tradeTarget)
+        end
     elseif event == "TRADE_ACCEPT_UPDATE" then
         srcAccept, targAccept = ...
         CheckForHSTrade(false)
@@ -453,7 +455,7 @@ function CheckForHSTrade(isComplete)
     if isComplete then
         if hasHSInTrade then
             print("Healthstone Traded - telling "..tradeTarget.." that it came from "..healthStoneSrc)
-            Shard_COM_SendSource(HSAction, tradeTarget, healthStoneSrc)
+            Shard_COM_SendSource(HSAction, healthStoneSrc, tradeTarget)
             healthStoneSrc = ""
         else
             print("No Healthstone found in successful trade, ignoring...")
