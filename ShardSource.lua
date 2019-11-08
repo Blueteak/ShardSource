@@ -81,10 +81,8 @@ f:SetScript("OnEvent", function(self, event, ...)
 
     -- Trading Healthstone
     elseif event == "TRADE_SHOW" then
-        tradeTarget = UnitName("target")
-        if tradeTarget then
-            print("Trade opened with "..tradeTarget)
-        end
+        tradeTarget = TradeFrameRecipientNameText:GetText()
+        print("Trade opened with "..tradeTarget)
     elseif event == "TRADE_ACCEPT_UPDATE" then
         srcAccept, targAccept = ...
         CheckForHSTrade(false)
