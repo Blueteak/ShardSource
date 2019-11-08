@@ -62,7 +62,7 @@ f:SetScript("OnEvent", function(self, event, ...)
                 lastAction = "SStone"
                 UpdateShardList()
             elseif string.find(spellName, "Soulstone Resurrection") then
-                local msg = "protected " .. UnitName("target") .. " using the soul of " .. GetNameFromID(soulStoneSrc)
+                local msg = "protected " .. UnitName("target") .. " using the soul of " .. GetNameFromID(soulStoneSrc).."."
                 SendChatMessage(msg, "EMOTE", nil, nil)
                 soulStoneSrc = ""
             end
@@ -181,9 +181,9 @@ function SetStoneTip(tooltip, isHealth)
     local r,g,b = GetItemQualityColor(GetQualityFromID(location))
 
     local text = "Soul of "..GetNameFromID(srcName)..""
-    --tooltip:AddLine(text, GetItemQualityColor(GetQualityFromID(srcName)))
-    title:SetText(text)
-    title:SetTextColor(r,g,b)
+    tooltip:AddLine(text, GetItemQualityColor(GetQualityFromID(srcName)))
+    --title:SetText(text)
+    --title:SetTextColor(r,g,b)
 end
 
 function GetSoulTextFromKillID(uid)
@@ -273,7 +273,7 @@ function ShardProcess()
         -- Summoned a Demon
         elseif lastAction == "Demon" then
             print("Demon summoned from " .. shardSrc)
-            local msg = "summoned a " .. demonSummoned .. " using the soul of " .. GetNameFromID(shardSrc)
+            local msg = "summoned a " .. demonSummoned .. " using the soul of " .. GetNameFromID(shardSrc).."."
             SendChatMessage(msg, "EMOTE", nil, nil)
             demonSummoned = ""
             lastAction = ""
@@ -281,7 +281,7 @@ function ShardProcess()
         -- Summoned a Player
         elseif lastAction == "SummonPlayer" then
             print(summonPlrSrc.." summoned from " .. shardSrc)
-            local msg = "summoned " .. summonPlrSrc .. " using the soul of " .. GetNameFromID(shardSrc)
+            local msg = "summoned " .. summonPlrSrc .. " using the soul of " .. GetNameFromID(shardSrc).."."
             SendChatMessage(msg, "EMOTE", nil, nil)
             Shard_COM_SendSource(SMAction, shardSrc, UnitName("player"))
             summonPlrSrc = ""
@@ -441,7 +441,7 @@ function GotMessage(msg, sender)
         healthStoneSrc = unit
         print("Healthstone Source: " .. healthStoneSrc)
     elseif itype and itype == SMAction then
-        print("You have been by "..sender.." using the soul of " .. GetNameFromID(unit))
+        print("You have been by "..sender.." using the soul of " .. GetNameFromID(unit)..".")
     end
 end
 
