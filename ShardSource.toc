@@ -1,0 +1,9 @@
+## Interface: 11302
+## Version: 1.0
+## Title: Shard Source
+## Notes: Displays source of Soul Shards
+## Author: Blueteak
+## SavedVariablesPerCharacter: Shards
+
+ShardSource.lua
+ShardSource.xml
