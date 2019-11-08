@@ -21,6 +21,12 @@ local soulStoneSrc = ""
 local summonPlrSrc = ""
 local demonSummoned = ""
 
+-- Trade (Healthstones)
+local tradeTarget = ""
+local srcAccept = 0
+local targAccept = 0
+local hasHSInTrade = false
+
 f:SetScript("OnEvent", function(self, event, ...)
     local arg1 = ...
     local _ = 0
@@ -71,6 +77,28 @@ f:SetScript("OnEvent", function(self, event, ...)
         local prefix, msg, dtype, sender = ...
 		if prefix == Shard_Channel then
             GotMessage(msg, sender)
+        end
+
+    -- Trading Healthstone
+    elseif event == "TRADE_SHOW" then
+        tradeTarget = UnitName("target")
+        print("Trade opened with "..tradeTarget)
+    elseif event == "TRADE_ACCEPT_UPDATE" then
+        srcAccept, targAccept = ...
+        CheckForHSTrade(false)
+        print("Trade Accept Updated "..srcAccept..", " ..targAccept)
+    elseif event == "TRADE_REQUEST_CANCEL" then
+        srcAccept = 0
+        targAccept = 0
+        print("Trade was Cancelled")
+    elseif event == "TRADE_CLOSED" then
+        if tradeTarget ~= "" and srcAccept == 1 then
+            print("Trade Accepted, checking HS was sent")
+            CheckForHSTrade(true)
+            srcAccept = 0
+            targAccept = 0
+        else
+            print("Trade Finished without success with "..tradeTarget..", "..srcAccept..", " ..targAccept)
         end
 	end
 end)
@@ -367,6 +395,10 @@ function SetBagItemGlow(bagId, slot, bank)
 			end
 		end
 	end
+    if bagId and bank and bankOpen == 1 and bagId == BANK_CONTAINER then
+        -- Bank Frame Items don't have ability to set color?
+        -- item = _G["BankFrameItem"..(GetContainerNumSlots(BANK_CONTAINER) + 1 - slot)]
+    end
 	if item then
         local color = NEW_ITEM_ATLAS_BY_QUALITY[GetQualityFromID(locationid)]
 		item.NewItemTexture:SetAtlas(color)
@@ -417,7 +449,47 @@ function Shard_IsValidName(UnitName)
     return UnitName ~= _G["UNKNOWN"] and UnitName ~= _G["UNKNOWNOBJECT"]
 end
 
+function CheckForHSTrade(isComplete)
+    if isComplete then
+        if hasHSInTrade then
+            print("Healthstone Traded - telling "..tradeTarget.." that it came from "..healthStoneSrc)
+            Shard_COM_SendSource(HSAction, tradeTarget, healthStoneSrc)
+            healthStoneSrc = ""
+        else
+            print("No Healthstone found in successful trade, ignoring...")
+        end
+    else
+        hasHSInTrade = false
+        for index=1,7 do
+            local name = GetTradePlayerItemInfo(index)
+            if name and string.find(name, "Healthstone") then
+                hasHSInTrade = true
+                print("Found a Healthstone in trade window!")
+                return
+            end
+        end
+        if not hasHSInTrade then
+            print("Trade Status updated with no Healthstone")
+        end
+    end
+end
+
 hooksecurefunc("ContainerFrameItemButton_OnEnter", function(self)
+    SetCursorPos(self)
+end)
+
+-- Theres gotta be a better way...
+function CheckBankHover()
+    for slot=1,GetContainerNumSlots(BANK_CONTAINER) do
+        local slotFrame = _G["BankFrameItem"..(GetContainerNumSlots(BANK_CONTAINER) + 1 - slot)]
+        if slotFrame and MouseIsOver(slotFrame) then
+            SetCursorPos(slotFrame)
+            return
+        end
+    end
+end
+
+function SetCursorPos(self)
     hoverbag = self:GetParent():GetID()
     hoverslot = self:GetID()
     hoverbank = 0
@@ -425,16 +497,23 @@ hooksecurefunc("ContainerFrameItemButton_OnEnter", function(self)
         hoverbank = 1
     end
     ShowBagColors()
-end)
+end
 
 function ShardSource_OnUpdate()
     CheckBagOpenChanged()
+    if bankOpen == 1 then
+        CheckBankHover()
+    end
 end
 
 GameTooltip:HookScript("OnTooltipSetItem", SetShardTooltip)
 f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 f:RegisterEvent("ADDON_LOADED")
 f:RegisterEvent("BAG_UPDATE")
+f:RegisterEvent("TRADE_SHOW")
+f:RegisterEvent("TRADE_ACCEPT_UPDATE")
+f:RegisterEvent("TRADE_CLOSED")
+f:RegisterEvent("TRADE_REQUEST_CANCEL")
 f:RegisterEvent("PLAYER_TARGET_CHANGED")
 f:RegisterEvent("BANKFRAME_OPENED")
 f:RegisterEvent("BANKFRAME_CLOSED")
