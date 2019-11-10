@@ -3,6 +3,7 @@ local f = CreateFrame("Frame")
 Shard_Channel = "ShardSrc"
 local HSAction = "HStone"
 local SMAction = "Smmn"
+local SSAction = "SStone"
 
 local SoulShardItemID = 6265
 local shardCount = 0
@@ -13,11 +14,11 @@ local hadShardAt = ""
 local bankOpen = 0
 
 local targlvl = 0
+local levelDelta = 0
 local targtype = "normal"
+local targetCanGiveXP = false
 
 local lastAction = ""
-local healthStoneSrc = ""
-local soulStoneSrc = ""
 local summonPlrSrc = ""
 local demonSummoned = ""
 
@@ -27,27 +28,51 @@ local srcAccept = 0
 local targAccept = 0
 local hasHSInTrade = false
 
+-- Colors
+POOR =0
+COMMON =1
+UNCOMMON =2
+RARE =3
+EPIC =4
+LEGENDARY =5
+ARTIFACT =6
+HEIRLOOM =7
+
+local rarityColors = {
+    inline={
+        [POOR] ="9d9d9d",
+        [COMMON] ="ffffff",
+        [UNCOMMON] ="1eff00",
+        [RARE] ="0070dd",
+        [EPIC] ="a335ee",
+        [LEGENDARY] ="ff8000",
+        [ARTIFACT] ="e6cc80",
+        [HEIRLOOM] ="00ccff",
+        "",
+    }
+}
+
 f:SetScript("OnEvent", function(self, event, ...)
     local arg1 = ...
     local _ = 0
     if event == "ADDON_LOADED" and arg1 == addonname then
         shardCount = CountShards()
-        print("We have " .. shardCount .. " shards")
+        DebugLog("We have " .. shardCount .. " shards")
         Init()
     elseif event == "BAG_UPDATE" then
         UpdateShardList()
         ShowBagColors()
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent, _, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
-        if subevent == "UNIT_DIED" and destName == UnitName("target") then
+        if subevent == "UNIT_DIED" and destName == UnitName("target") and targetCanGiveXP then
             ctype = strsplit("-", destGUID)
-            lastShardKill = destName.."_"..ctype.."_"..targlvl.."_"..targtype
-            print("Target died while targeted: " .. lastShardKill)
+            lastShardKill = destName.."_"..ctype.."_"..levelDelta.."_"..targtype.."_"..targlvl
+            DebugLog("Target died while targeted: " .. lastShardKill)
             UpdateShardList()
         elseif subevent == "SPELL_CAST_SUCCESS" and sourceName == UnitName("player") then
             local timestamp, subevent, _, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags, spellID, spellName, spellSchool = CombatLogGetCurrentEventInfo()
             if string.find(spellName, "Create Healthstone") then
-                print("Healthstone Created")
+                DebugLog("Healthstone Created")
                 lastAction = "HStone"
                 UpdateShardList()
             elseif string.find(spellName, "Summon ") and not string.find(spellName, "Imp") and not string.find(spellName, "Dreadsteed") and not string.find(spellName, "Felsteed") then
@@ -62,9 +87,14 @@ f:SetScript("OnEvent", function(self, event, ...)
                 lastAction = "SStone"
                 UpdateShardList()
             elseif string.find(spellName, "Soulstone Resurrection") then
-                local msg = "protected " .. UnitName("target") .. " using the soul of " .. GetNameFromID(soulStoneSrc).."."
+                local msg = ""
+                if UnitName("target") then
+                    msg = "protected " .. UnitName("target") .. " using the soul of " .. GetNameFromID(Shards.soulStoneSrc).."."
+                else
+                    msg = "is now protected by the soul of " .. GetNameFromID(Shards.soulStoneSrc).."."
+                end
                 SendChatMessage(msg, "EMOTE", nil, nil)
-                soulStoneSrc = ""
+                Shards.soulStoneSrc = ""
             end
         end
     elseif event == "PLAYER_TARGET_CHANGED" then
@@ -82,23 +112,21 @@ f:SetScript("OnEvent", function(self, event, ...)
     -- Trading Healthstone
     elseif event == "TRADE_SHOW" then
         tradeTarget = TradeFrameRecipientNameText:GetText()
-        print("Trade opened with "..tradeTarget)
+        --DebugLog("Trade opened with "..tradeTarget)
     elseif event == "TRADE_ACCEPT_UPDATE" then
         srcAccept, targAccept = ...
         CheckForHSTrade(false)
-        print("Trade Accept Updated "..srcAccept..", " ..targAccept)
+        --DebugLog("Trade Accept Updated "..srcAccept..", " ..targAccept)
     elseif event == "TRADE_REQUEST_CANCEL" then
         srcAccept = 0
         targAccept = 0
-        print("Trade was Cancelled")
+        --DebugLog("Trade was Cancelled")
     elseif event == "TRADE_CLOSED" then
         if tradeTarget ~= "" and srcAccept == 1 then
-            print("Trade Accepted, checking HS was sent")
+            --DebugLog("Trade Accepted, checking HS was sent")
             CheckForHSTrade(true)
             srcAccept = 0
             targAccept = 0
-        else
-            print("Trade Finished without success with "..tradeTarget..", "..srcAccept..", " ..targAccept)
         end
 	end
 end)
@@ -111,6 +139,9 @@ function Init()
     if not Shards then
         Shards = {}
         Shards.UseEmotes = true;
+        Shards.healthStoneSrc = "";
+        Shards.soulStoneSrc = "";
+        Shards.debug = false
     end
     Shard_COM_Init()
 end
@@ -119,32 +150,49 @@ SLASH_SHARDSOURCE1 = "/shardsrc"
 SLASH_SHARDSOURCE2 = "/ssrc"
 SlashCmdList["SHARDSOURCE"] = function(msg)
     if msg == "testhealth" then
-        print("Testing Healthstone Message");
+        DebugLog("Testing Healthstone Message");
         Shard_COM_SendSource(HSAction,"TestUnit", UnitName("player"))
     elseif msg == "emote" then
         Shards.UseEmotes = not Shards.UseEmotes
         print("Use Shard Emotes: "..tostring(Shards.UseEmotes))
     elseif msg == "testsummon" then
-        print("Testing Summon Message");
+        DebugLog("Testing Summon Message");
         Shard_COM_SendSource(SMAction, summonPlrSrc, UnitName("player"))
+    elseif msg == "testsoulstone" then
+        DebugLog("Testing Soulstone Message");
+        Shard_COM_SendSource(SSAction, Shards.soulStoneSrc, UnitName("player"))
+    elseif msg == "debug" then
+        Shards.debug = not Shards.debug
+        print("Debug Mode: "..tostring(Shards.UseEmotes))
     end
 end
 
 function ChangedTarget()
     targlvl = UnitLevel("target")
     if targlvl == -1 then
-        targlvl = -100
+        levelDelta = -100
     else
-        targlvl = targlvl - UnitLevel("player")
+        levelDelta = targlvl - UnitLevel("player")
     end
-    targtype = UnitClassification("target")
+    if UnitIsPlayer("target") then
+        local _ = ""
+        _, targtype = UnitClass("target")
+    else
+       targtype = UnitClassification("target")
+    end
+
+    targetCanGiveXP = true;
+    if targlvl > 0 then
+        targetCanGiveXP = levelDelta > -GetQuestGreenRange()
+    end
+
 end
 
-local function SetShardTooltip(tt)
+local function SetTooltip(tt)
     local itemName = select(1, tt:GetItem())
     if itemName and itemName == "Soul Shard" then
 		SetShardTip(tt)
-    elseif itemName and string.find(itemName, "Healthstone") then
+    elseif itemName and string.find(itemName, "Healthstone") then -- Healthstone
         SetStoneTip(tt, true)
     elseif itemName and string.find(itemName, "Soulstone") then
         SetStoneTip(tt, false)
@@ -156,32 +204,50 @@ function SetShardTip(tooltip)
     local text = "Unknown Soul"
     local title = _G[tooltip:GetName().."TextLeft1"]
     local r,g,b = GetItemQualityColor(GetQualityFromID(location))
+    local detail = ""
 
     if Shards[location] then
         local uid = Shards[location]
         text = GetSoulTextFromKillID(uid)
+        detail = GetDetail(Shards[location])
     end
 
     title:SetText(text)
     title:SetTextColor(r,g,b)
+
+    if detail and detail ~= "" then
+        local det = "["..detail.."]"
+        tooltip:AddLine(det)
+    end
+
     tooltip:Show()
 end
 
 function SetStoneTip(tooltip, isHealth)
-    local srcName = healthStoneSrc;
+    local srcName = Shards.healthStoneSrc;
     if not isHealth then
-        srcName = soulStoneSrc
+        srcName = Shards.soulStoneSrc
     end
+
+    local detail = ""
     if not srcName or srcName == "" then
         srcName = "Unknown"
+    else
+        detail = GetDetail(srcName)
     end
 
-    local lineCount = tooltip:NumLines()
-    local title = _G[tooltip:GetName().."TextLeft"..lineCount]
-    local r,g,b = GetItemQualityColor(GetQualityFromID(location))
 
-    local text = "Soul of "..GetNameFromID(srcName)..""
-    tooltip:AddLine(text, GetItemQualityColor(GetQualityFromID(srcName)))
+    --local lineCount = tooltip:NumLines()
+    --local title = _G[tooltip:GetName().."TextLeft"..lineCount]
+    local r,g,b = GetItemQualityColor(GetQualityFromID(srcName))
+
+    local text = "|cffffffffSoul of |r"..rarityColors["inline"][GetQualityFromID(srcName)]..GetNameFromID(srcName).."|r"
+    tooltip:AddLine(text)--, r,g,b)
+    if detail and detail ~= "" then
+        local det = "["..detail.."]"
+        tooltip:AddLine(det)
+    end
+    tooltip:Show()
     --title:SetText(text)
     --title:SetTextColor(r,g,b)
 end
@@ -199,7 +265,31 @@ function GetNameFromID(uid)
     local name, type, level, rank = strsplit("_",uid)
     local retText = name
     if type == "Creature" and rank == "normal" then
-        retText = "a "..name
+        local concat = "a"
+        if string.find( "aeiouAEIOU",string.sub(name, 1, 1)) then
+            concat = "an"
+        end
+        retText = concat.." "..name
+    end
+    return retText
+end
+
+function GetDetail(uid)
+    local name, type, level, rank, realLevel = strsplit("_",uid)
+    local refLevel = UnitLevel("player")
+    local retText = ""
+    if type == "Player" then
+        if not realLevel then
+            realLevel = refLevel + level
+        end
+        local table = {}
+        FillLocalizedClassList(table)
+        local class = table[rank]
+        if class then
+            retText = realLevel.." "..class
+        else
+            retText = realLevel.." Player"
+        end
     end
     return retText
 end
@@ -213,6 +303,10 @@ end
 function UpdateShardList()
     if not Shards then
         Shards = {}
+        Shards.UseEmotes = true;
+        Shards.healthStoneSrc = "";
+        Shards.soulStoneSrc = "";
+        Shards.debug = false
     end
 
     for bag = 0, NUM_BAG_SLOTS do
@@ -243,13 +337,13 @@ function ShardProcess()
     -- We have a new Soul Shard - save the info!
     if newShardLoc ~= "" then
         if lastShardKill ~= "-1" then
-            --print("Had recent kill, assuming Shard is from " .. lastShardKill .. " : setting ID at " .. newShardLoc)
+            DebugLog("Had recent kill, assuming Shard is from " .. lastShardKill .. " : setting ID at " .. newShardLoc)
             Shards[newShardLoc] = lastShardKill
             lastShardKill = "-1"
 
         -- Shard moved in bag (one new and one lost), just update its position
         elseif hadShardAt ~= "" then
-            --print("Shard Moved from " .. hadShardAt .. " to " .. newShardLoc)
+            DebugLog("Shard Moved from " .. hadShardAt .. " to " .. newShardLoc)
             Shards[newShardLoc] = Shards[hadShardAt]
         end
     end
@@ -260,19 +354,18 @@ function ShardProcess()
 
         -- Created a Healthstone
         if lastAction == "HStone" then
-            print("Healthstone created from " .. shardSrc)
-            healthStoneSrc = shardSrc
+            DebugLog("Healthstone created from " .. shardSrc)
+            Shards.healthStoneSrc = shardSrc
             lastAction = ""
 
         -- Created a Soulstone
         elseif lastAction == "SStone" then
-            print("Soulstone created from " .. shardSrc)
-            soulStoneSrc = shardSrc
+            DebugLog("Soulstone created from " .. shardSrc)
+            Shards.soulStoneSrc = shardSrc
             lastAction = ""
 
         -- Summoned a Demon
         elseif lastAction == "Demon" then
-            print("Demon summoned from " .. shardSrc)
             local msg = "summoned a " .. demonSummoned .. " using the soul of " .. GetNameFromID(shardSrc).."."
             SendChatMessage(msg, "EMOTE", nil, nil)
             demonSummoned = ""
@@ -280,10 +373,9 @@ function ShardProcess()
 
         -- Summoned a Player
         elseif lastAction == "SummonPlayer" then
-            print(summonPlrSrc.." summoned from " .. shardSrc)
             local msg = "summoned " .. summonPlrSrc .. " using the soul of " .. GetNameFromID(shardSrc).."."
             SendChatMessage(msg, "EMOTE", nil, nil)
-            Shard_COM_SendSource(SMAction, shardSrc, UnitName("player"))
+            Shard_COM_SendSource(SMAction, shardSrc, UnitName("target"))
             summonPlrSrc = ""
             lastAction = ""
 
@@ -302,11 +394,11 @@ function CheckShard(bag, slot, bank, itemid)
 
     if not Shards[locationID] and isShard then
         --No Shard Registered to this location but we have a shard
-        --print("Found a new shard in our bag: " .. locationID)
+        DebugLog("Found a new shard in our bag: " .. locationID)
         newShardLoc = locationID
     elseif Shards[locationID] and not isShard then
         -- We used to have a shard here, now it's missing!
-        --print("We're missing a shard!")
+        DebugLog("We're missing a shard! - Checking where it went")
         hadShardAt = locationID
     end
 end
@@ -350,7 +442,7 @@ end
 function GetQualityFromID(location)
 
     if not Shards[location] then
-        return GetItemQualityColor(1)
+        return COMMON
     end
 
     local level, rank, type = 0
@@ -358,26 +450,26 @@ function GetQualityFromID(location)
     local name, type, level, rank = strsplit("_",uid)
     if type == "Creature" then
         if level == -100 or rank == "worldboss" then
-            return LE_ITEM_QUALITY_LEGENDARY
+            return LEGENDARY
         elseif tonumber(level) >= -3 then
             if rank == "elite" or rank == "rareelite" then
-                return LE_ITEM_QUALITY_UNCOMMON
+                return UNCOMMON
             else
-                return LE_ITEM_QUALITY_COMMON
+                return COMMON
             end
         else
-            return LE_ITEM_QUALITY_POOR
+            return POOR
         end
     elseif type == "Player" then
         if level == -100 then
-            return LE_ITEM_QUALITY_ARTIFACT
+            return ARTIFACT
         elseif tonumber(level) >= 0 then
-            return LE_ITEM_QUALITY_EPIC
+            return EPIC
         else
-            return LE_ITEM_QUALITY_RARE
+            return RARE
         end
     else
-        return LE_ITEM_QUALITY_COMMON
+        return COMMON
     end
 end
 
@@ -421,27 +513,27 @@ end
 
 -- Communication System
 
-
 function Shard_COM_Init()
     C_ChatInfo.RegisterAddonMessagePrefix(Shard_Channel)
     C_ChatInfo.IsAddonMessagePrefixRegistered(Shard_Channel)
 end
 
 function Shard_COM_SendSource(action, Src, UnitName)
-    print("Attempting Src Send to "..UnitName.." of: "..Src)
     if Shard_IsValidName(UnitName) then
         C_ChatInfo.SendAddonMessage(Shard_Channel, action..":"..Src, "WHISPER", UnitName)
     end
 end
 
 function GotMessage(msg, sender)
-    print("Got ShardMsg " .. msg)
+    DebugLog("Got ShardMsg " .. msg)
     itype, unit = strsplit(":", msg)
     if itype and itype == HSAction then
-        healthStoneSrc = unit
-        print("Healthstone Source: " .. healthStoneSrc)
+        Shards.healthStoneSrc = unit
+        DebugLog("Healthstone Source: " .. Shards.healthStoneSrc)
     elseif itype and itype == SMAction then
-        print("You have been by "..sender.." using the soul of " .. GetNameFromID(unit)..".")
+        print("|cFFff8080You have been summoned using the soul of " .. GetNameFromID(unit)..".|r")
+    elseif itype and itype == SSAction then
+        Shards.soulStoneSrc = unit
     end
 end
 
@@ -452,11 +544,8 @@ end
 function CheckForHSTrade(isComplete)
     if isComplete then
         if hasHSInTrade then
-            print("Healthstone Traded - telling "..tradeTarget.." that it came from "..healthStoneSrc)
-            Shard_COM_SendSource(HSAction, healthStoneSrc, tradeTarget)
-            healthStoneSrc = ""
-        else
-            print("No Healthstone found in successful trade, ignoring...")
+            Shard_COM_SendSource(HSAction, Shards.healthStoneSrc, tradeTarget)
+            Shards.healthStoneSrc = ""
         end
     else
         hasHSInTrade = false
@@ -464,12 +553,8 @@ function CheckForHSTrade(isComplete)
             local name = GetTradePlayerItemInfo(index)
             if name and string.find(name, "Healthstone") then
                 hasHSInTrade = true
-                print("Found a Healthstone in trade window!")
                 return
             end
-        end
-        if not hasHSInTrade then
-            print("Trade Status updated with no Healthstone")
         end
     end
 end
@@ -478,7 +563,34 @@ hooksecurefunc("ContainerFrameItemButton_OnEnter", function(self)
     SetCursorPos(self)
 end)
 
--- Theres gotta be a better way...
+-- Set Tooltip for Soulstone
+hooksecurefunc(GameTooltip, "SetUnitAura", function(self, unit, index, filter)
+	local spellName,_,_,_,_,_,caster = UnitAura(unit, index, filter)
+    if string.find(spellName, "Soulstone") then
+        local casterName = caster and UnitName(caster)
+
+        srcName = Shards.soulStoneSrc
+        if not srcName or srcName == "" then
+            srcName = "Molten Giant_0_elite_60"
+        end
+
+        local text = "|cffffffffProtected by the soul of |r|cff"..rarityColors["inline"][GetQualityFromID(srcName)+1]..GetNameFromID(srcName).."|r"
+
+        local lineCount = self:NumLines()
+        local description = _G[self:GetName().."TextLeft"..lineCount-1]
+        description:SetText(text)
+        self:Show()
+    end
+end)
+
+hooksecurefunc(GameTooltip,"SetInventoryItem",function(self,bag,slot)
+  SetTooltip(self)
+end)
+
+hooksecurefunc(GameTooltip,"SetBagItem",function(self,bag,slot)
+  SetTooltip(self)
+end)
+
 function CheckBankHover()
     for slot=1,GetContainerNumSlots(BANK_CONTAINER) do
         local slotFrame = _G["BankFrameItem"..(GetContainerNumSlots(BANK_CONTAINER) + 1 - slot)]
@@ -499,6 +611,8 @@ function SetCursorPos(self)
     ShowBagColors()
 end
 
+-- Update Method to check if mouse is over any of the Bank Frame slots
+-- It seems like there should be a better way to do this...
 function ShardSource_OnUpdate()
     CheckBagOpenChanged()
     if bankOpen == 1 then
@@ -506,7 +620,15 @@ function ShardSource_OnUpdate()
     end
 end
 
-GameTooltip:HookScript("OnTooltipSetItem", SetShardTooltip)
+function DebugLog(toPrint)
+    if Shards.debug then
+        print(toPrint)
+    end
+end
+
+-- Function Hooks
+--GameTooltip:HookScript("OnTooltipSetItem", SetTooltip)
+ItemRefTooltip:HookScript("OnTooltipSetItem", SetTooltip)
 f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 f:RegisterEvent("ADDON_LOADED")
 f:RegisterEvent("BAG_UPDATE")
@@ -518,4 +640,4 @@ f:RegisterEvent("PLAYER_TARGET_CHANGED")
 f:RegisterEvent("BANKFRAME_OPENED")
 f:RegisterEvent("BANKFRAME_CLOSED")
 f:RegisterEvent("CHAT_MSG_ADDON")
-print("[ShardSource] by Blueteak loaded.")
+print("Loaded |cFF"..rarityColors.inline[EPIC].."[ShardSource]|r by Blueteak.")
