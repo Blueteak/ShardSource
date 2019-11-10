@@ -16,3 +16,12 @@ Crafted Healthstones and Soulstones will keep a reference to what Soul was used 
 ### Cross-Player Data
 ![](https://i.imgur.com/gwkndM1.png)
 Even if you're not a warlock, you can still get value out of this addon! Healthstones that are traded to you and Soulstone Resurrection will show what soul the warlock used to create those items.
+
+## Slash Commands
+Commands start with `/ssrc` or `/shardsrc` interchangably.
+
+```/ssrc emote```
+Toggles the public emoting part of the addon for summoning players/demons and useing a soulstone on a player.
+
+```/ssrc debug```
+Toggles logging of shard-based actions, useful for debugging
