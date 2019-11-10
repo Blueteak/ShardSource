@@ -1,5 +1,4 @@
-#ShardSource
-
+# ShardSource
 Shard Source is an addon for tracking the source of Warlock Soul Shards. No longer will souls be unceremoniously stuffed into a the corner of a bag or the nth slot of your soul pouch. Instead, each soul will be tracked as you drain them, leaving you with a visual history of your conquests and trophies to fill up your extra bank slots!
 
 ### Features
