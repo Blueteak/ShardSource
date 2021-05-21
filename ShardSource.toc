@@ -1,4 +1,4 @@
-## Interface: 11302
+## Interface: 20501
 ## Version: 1.0
 ## Title: Shard Source
 ## Notes: Displays source of Soul Shards
