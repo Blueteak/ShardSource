@@ -250,7 +250,7 @@ function SetStoneTip(tooltip, isHealth)
     end
     tooltip:Show()
     --title:SetText(text)
-    --title:SetTextColor(r,g,b)
+    --title:SetTextColor(r,g,b) 
 end
 
 function GetSoulTextFromKillID(uid)
