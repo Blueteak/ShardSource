@@ -64,9 +64,10 @@ f:SetScript("OnEvent", function(self, event, ...)
         ShowBagColors()
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent, _, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
-        if subevent == "UNIT_DIED" and destName == UnitName("target") and targetCanGiveXP then
+        local fname = strsplit("-", destName)
+        if subevent == "UNIT_DIED" and fname == UnitName("target") and targetCanGiveXP then
             ctype = strsplit("-", destGUID)
-            lastShardKill = destName.."_"..ctype.."_"..levelDelta.."_"..targtype.."_"..targlvl
+            lastShardKill = fname.."_"..ctype.."_"..levelDelta.."_"..targtype.."_"..targlvl
             DebugLog("Target died while targeted: " .. lastShardKill)
             UpdateShardList()
         elseif subevent == "SPELL_CAST_SUCCESS" and sourceName == UnitName("player") then
@@ -345,6 +346,9 @@ function ShardProcess()
         elseif hadShardAt ~= "" then
             DebugLog("Shard Moved from " .. hadShardAt .. " to " .. newShardLoc)
             Shards[newShardLoc] = Shards[hadShardAt]
+        --else
+        --    DebugLog("Unidentified Shard - Randomizing")
+        --    Shards[newShardLoc] =  "Unknown_000_0_normal_-1"
         end
     end
 
