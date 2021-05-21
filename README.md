@@ -21,7 +21,7 @@ Even if you're not a warlock, you can still get value out of this addon! Healths
 Commands start with `/ssrc` or `/shardsrc` interchangably.
 
 ```/ssrc emote```
-Toggles the public emoting part of the addon for summoning players/demons and useing a soulstone on a player.
+Toggles the public emoting part of the addon for summoning players/demons and using a soulstone on a player.
 
 ```/ssrc debug```
 Toggles logging of shard-based actions, useful for debugging
