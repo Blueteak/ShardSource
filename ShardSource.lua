@@ -65,13 +65,30 @@ f:SetScript("OnEvent", function(self, event, ...)
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent, _, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
         local fname = strsplit("-", destName)
+        if(subevent == "UNIT_SPELLCAST_SUCCEEDED") then
+            DebugLog("Cast Occurred: "..sourceName.." - "..UnitName("player"))
+        end
         if subevent == "UNIT_DIED" and fname == UnitName("target") and targetCanGiveXP then
             ctype = strsplit("-", destGUID)
             lastShardKill = fname.."_"..ctype.."_"..levelDelta.."_"..targtype.."_"..targlvl
             DebugLog("Target died while targeted: " .. lastShardKill)
             UpdateShardList()
-        elseif subevent == "SPELL_CAST_SUCCESS" and sourceName == UnitName("player") then
-            local timestamp, subevent, _, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags, spellID, spellName, spellSchool = CombatLogGetCurrentEventInfo()
+        end 
+    elseif event == "PLAYER_TARGET_CHANGED" then
+        ChangedTarget()
+    elseif event == "BANKFRAME_OPENED" then
+        bankOpen = 1
+    elseif event == "BANKFRAME_CLOSED" then
+        bankOpen = 0
+    elseif event == "CHAT_MSG_ADDON" then
+        local prefix, msg, dtype, sender = ...
+		if prefix == Shard_Channel then
+            GotMessage(msg, sender)
+        end
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        local castTarget, castGUID, spellid = ...
+        local spellName = GetSpellInfo(spellid)
+        if castTarget == "player" then
             if string.find(spellName, "Create Healthstone") then
                 DebugLog("Healthstone Created")
                 lastAction = "HStone"
@@ -97,17 +114,6 @@ f:SetScript("OnEvent", function(self, event, ...)
                 SendChatMessage(msg, "EMOTE", nil, nil)
                 Shards.soulStoneSrc = ""
             end
-        end
-    elseif event == "PLAYER_TARGET_CHANGED" then
-        ChangedTarget()
-    elseif event == "BANKFRAME_OPENED" then
-        bankOpen = 1
-    elseif event == "BANKFRAME_CLOSED" then
-        bankOpen = 0
-    elseif event == "CHAT_MSG_ADDON" then
-        local prefix, msg, dtype, sender = ...
-		if prefix == Shard_Channel then
-            GotMessage(msg, sender)
         end
 
     -- Trading Healthstone
@@ -635,6 +641,7 @@ end
 ItemRefTooltip:HookScript("OnTooltipSetItem", SetTooltip)
 f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 f:RegisterEvent("ADDON_LOADED")
+f:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 f:RegisterEvent("BAG_UPDATE")
 f:RegisterEvent("TRADE_SHOW")
 f:RegisterEvent("TRADE_ACCEPT_UPDATE")
