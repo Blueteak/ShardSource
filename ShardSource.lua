@@ -4,6 +4,7 @@ Shard_Channel = "ShardSrc"
 local HSAction = "HStone"
 local SMAction = "Smmn"
 local SSAction = "SStone"
+local tullaBagAddon = Bagnon
 
 local SoulShardItemID = 6265
 local shardCount = 0
@@ -64,7 +65,10 @@ f:SetScript("OnEvent", function(self, event, ...)
         ShowBagColors()
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local timestamp, subevent, _, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags = CombatLogGetCurrentEventInfo()
-        local fname = strsplit("-", destName)
+        local fname = ""
+        if destName then
+            fname = strsplit("-", destName)
+        end
         if(subevent == "UNIT_SPELLCAST_SUCCEEDED") then
             DebugLog("Cast Occurred: "..sourceName.." - "..UnitName("player"))
         end
@@ -103,6 +107,12 @@ f:SetScript("OnEvent", function(self, event, ...)
                 UpdateShardList()
             elseif string.find(spellName, "Create Soulstone") then
                 lastAction = "SStone"
+                UpdateShardList()
+            elseif string.find(spellName, "Ritual of Souls") then
+                lastAction = "Ritual"
+                UpdateShardList()
+            elseif string.find(spellName, "Soulshatter") then
+                lastAction = "Shatter"
                 UpdateShardList()
             elseif string.find(spellName, "Soulstone Resurrection") then
                 local msg = ""
@@ -170,7 +180,7 @@ SlashCmdList["SHARDSOURCE"] = function(msg)
         Shard_COM_SendSource(SSAction, Shards.soulStoneSrc, UnitName("player"))
     elseif msg == "debug" then
         Shards.debug = not Shards.debug
-        print("Debug Mode: "..tostring(Shards.UseEmotes))
+        print("Debug Mode: "..tostring(Shards.debug))
     end
 end
 
@@ -366,20 +376,17 @@ function ShardProcess()
         if lastAction == "HStone" then
             DebugLog("Healthstone created from " .. shardSrc)
             Shards.healthStoneSrc = shardSrc
-            lastAction = ""
 
         -- Created a Soulstone
         elseif lastAction == "SStone" then
             DebugLog("Soulstone created from " .. shardSrc)
             Shards.soulStoneSrc = shardSrc
-            lastAction = ""
 
         -- Summoned a Demon
         elseif lastAction == "Demon" then
             local msg = "summoned a " .. demonSummoned .. " using the soul of " .. GetNameFromID(shardSrc).."."
             SendChatMessage(msg, "EMOTE", nil, nil)
             demonSummoned = ""
-            lastAction = ""
 
         -- Summoned a Player
         elseif lastAction == "SummonPlayer" then
@@ -387,9 +394,19 @@ function ShardProcess()
             SendChatMessage(msg, "EMOTE", nil, nil)
             Shard_COM_SendSource(SMAction, shardSrc, UnitName("target"))
             summonPlrSrc = ""
-            lastAction = ""
+
+        -- Soulshatter
+        elseif lastAction == "Shatter" then
+            local msg = "shattered the soul of " .. GetNameFromID(shardSrc) .. ", fading into the background."
+            SendChatMessage(msg, "EMOTE", nil, nil)
+
+        elseif lastAction == "Ritual" then
+            local msg = "brought forth a Soulwell, filled with the essence of " .. GetNameFromID(shardSrc) .. "."
+            SendChatMessage(msg, "EMOTE", nil, nil)
 
         end
+
+        lastAction = ""
         Shards[hadShardAt] = nil
     end
 
@@ -488,7 +505,9 @@ function SetBagItemGlow(bagId, slot, bank)
     local locationid = getLocationID(bagId, slot, bank)
 
 	if IsAddOnLoaded("OneBag3") then
-		item = _G["OneBagFrameBag"..bagId.."Item"..slot]
+        item = _G["OneBagFrameBag"..bagId.."Item"..slot]
+    --elseif tullaBagAddon then
+        --item = tullaBagAddon.ItemSlot[slot]
 	else
 		for i = 1, NUM_CONTAINER_FRAMES, 1 do
 			local frame = _G["ContainerFrame"..i]
