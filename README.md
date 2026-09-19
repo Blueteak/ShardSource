@@ -13,6 +13,8 @@ Each soul shard you collect will retain information about what enemy it came fro
 
 Crafted Healthstones and Soulstones will keep a reference to what Soul was used to create them. Additionally summoning demons or other players will emote publicly what soul was used to summon them.
 
+Your summoned demon's mouseover tooltip replaces the owner line with `<Summoned from Hogger's soul>`, using the consumed soul's name and quality color. This is visible only to you and starts with your next tracked summon. The source survives a UI reload while the same demon remains summoned. Imps do not consume a shard and keep their normal tooltip.
+
 ### Cross-Player Data
 ![](https://i.imgur.com/gwkndM1.png)
 Even if you're not a warlock, you can still get value out of this addon! Healthstones that are traded to you and Soulstone Resurrection will show what soul the warlock used to create those items.

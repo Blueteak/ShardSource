@@ -6,6 +6,7 @@ local SHARD_ID, PREFIX, UNKNOWN_SOUL = 6265, "ShardSrc", "Unknown"
 local ready, bankOpen, scanQueued = false, false, false
 local inventory, drain, pendingAction, recentLoss, sentCast = {}, nil, nil, nil, nil
 local trade, lastTrade = nil, nil
+local pendingDemon
 local lastSourceStatus = "No Drain Soul observed yet."
 local lastShardStatus = "No new shard observed yet."
 local spellActions = {}
@@ -115,12 +116,22 @@ end
 
 local function InitSpells()
     local actions = { [1120]="drain", [6201]="health", [693]="soul",
+        [688]="imp",
         [697]="demon", [712]="demon", [691]="demon", [30146]="demon",
         [698]="summon", [29893]="ritual", [29858]="shatter", [20707]="protect" }
     for id, action in pairs(actions) do
         local name = C_Spell.GetSpellName(id)
         if PlainString(name) then spellActions[name] = action end
     end
+end
+
+local function BindDemonSource()
+    if not pendingDemon then return end
+    if pendingDemon.expires < GetTime() then pendingDemon = nil; return end
+    local guid = UnitGUID("pet")
+    if not PlainString(guid) or guid == pendingDemon.previousGUID then return end
+    Shards.demon = { guid=guid, source=pendingDemon.source }
+    pendingDemon = nil
 end
 
 local function ApplyAction(action, source)
@@ -130,6 +141,11 @@ local function ApplyAction(action, source)
     elseif action.kind == "soul" then
         Shards.soulStoneSrc = source
     elseif action.kind == "demon" then
+        -- Wait for the new pet if the consumed shard arrives before UNIT_PET.
+        if action.petGUID ~= nil then
+            pendingDemon = { source=source, previousGUID=action.petGUID, expires=GetTime()+2 }
+            BindDemonSource()
+        end
         Emote("used the soul of " .. SoulName(source) .. " to cast " .. action.spell .. ".")
     elseif action.kind == "summon" then
         Emote("began summoning " .. (action.target or "a player") .. " using the soul of " .. SoulName(source) .. ".")
@@ -329,6 +345,27 @@ local function ItemTooltip(tooltip, data)
         tooltip:AddLine((level and level .. " " or "") .. className, 1, 1, 1)
     end
 end
+
+local function DemonTooltip(tooltip, data)
+    if not ready or tooltip:IsForbidden() or not ReadableTable(data) or not PlainString(data.guid) then return end
+    if not C_RestrictedActions.CheckAllowProtectedFunctions(tooltip, true) then return end
+    BindDemonSource()
+    local demon, guid = Shards.demon, UnitGUID("pet")
+    if not demon or not PlainString(guid) or data.guid ~= guid or demon.guid ~= guid then return end
+    if not ReadableTable(data.lines) then return end
+    local text = demon.source == UNKNOWN_SOUL and "<Summoned from an unknown soul>"
+        or "<Summoned from " .. ColoredSoul(demon.source) .. "'s soul>"
+    local name = tooltip:GetName()
+    for _, line in ipairs(data.lines) do
+        if ReadableTable(line) and Readable(line.type) and line.type == Enum.TooltipDataLineType.UnitOwner
+            and Readable(line.lineIndex) and type(line.lineIndex) == "number" then
+            local label = name and _G[name .. "TextLeft" .. line.lineIndex]
+            if label then label:SetText(text); return end
+        end
+    end
+    tooltip:AddLine(text, 1, 1, 1)
+end
+
 local function SpellEvent(event, unit, castGUID, spellID)
     if not Readable(unit) or not Readable(spellID) then
         drain, pendingAction, recentLoss, sentCast = nil, nil, nil, nil
@@ -349,20 +386,25 @@ local function SpellEvent(event, unit, castGUID, spellID)
             drain.expires = GetTime()+3
         end
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" and kind then
-        local target
+        local target, petGUID
         if sentCast and Readable(castGUID) and sentCast.guid == castGUID and sentCast.expires >= GetTime() then
-            target = sentCast.target
+            target, petGUID = sentCast.target, sentCast.petGUID
         end
         if kind == "protect" then
             local source = Shards.soulStoneSrc
             Emote("protected " .. (target or "a player") .. " using the soul of " .. SoulName(source) .. ".")
             SendSource("SStone", source, target)
             Shards.soulStoneSrc = UNKNOWN_SOUL
+        elseif kind == "imp" then
+            -- Imps do not consume a soul shard.
+            Shards.demon, pendingDemon = nil, nil
+            pendingAction, recentLoss = nil, nil
         else
-            pendingAction = { kind=kind, spell=spellName, target=target, expires=GetTime()+2 }
+            pendingAction = { kind=kind, spell=spellName, target=target, petGUID=petGUID, expires=GetTime()+2 }
             -- A new stone must not inherit an older stone's source if attribution fails.
             if kind == "health" then Shards.healthStoneSrc = UNKNOWN_SOUL end
             if kind == "soul" then Shards.soulStoneSrc = UNKNOWN_SOUL end
+            if kind == "demon" then Shards.demon, pendingDemon = nil, nil end
         end
         sentCast = nil
     end
@@ -407,9 +449,12 @@ frame:SetScript("OnEvent", function(_, event, ...)
         if Shards.UseEmotes == nil then Shards.UseEmotes = true end
         Shards.healthStoneSrc = PlainString(Shards.healthStoneSrc) and Shards.healthStoneSrc or UNKNOWN_SOUL
         Shards.soulStoneSrc = PlainString(Shards.soulStoneSrc) and Shards.soulStoneSrc or UNKNOWN_SOUL
+        if not ReadableTable(Shards.demon) or not PlainString(Shards.demon.guid)
+            or not PlainString(Shards.demon.source) then Shards.demon = nil end
         Shards.schemaVersion = 2
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, ItemTooltip)
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, DemonTooltip)
         InitSpells()
         ready = true
         print("Loaded |cffa335ee[ShardSource]|r " .. addonVersion .. " for WoW Forever.")
@@ -417,6 +462,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
         return
     elseif event == "PLAYER_ENTERING_WORLD" then
         drain, pendingAction, recentLoss, sentCast = nil, nil, nil, nil
+        pendingDemon = nil
         inventory = {}
         ScanInventory()
         RefreshBags()
@@ -431,8 +477,19 @@ frame:SetScript("OnEvent", function(_, event, ...)
     elseif event == "UNIT_SPELLCAST_SENT" then
         local unit, target, guid = ...
         if Readable(unit) and unit == "player" then
-            sentCast = PlainString(target) and PlainString(guid) and { target=target, guid=guid, expires=GetTime()+30 } or nil
+            sentCast = nil
+            if PlainString(guid) then
+                local petGUID = UnitGUID("pet")
+                sentCast = { target=PlainString(target) and target or nil, guid=guid, expires=GetTime()+30 }
+                -- false means no previous pet; nil means its identity was unavailable.
+                if Readable(petGUID) and (petGUID == nil or PlainString(petGUID)) then
+                    sentCast.petGUID = petGUID or false
+                end
+            end
         end
+    elseif event == "UNIT_PET" then
+        local unit = ...
+        if Readable(unit) and unit == "player" then BindDemonSource() end
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" or event == "UNIT_SPELLCAST_CHANNEL_START" or event == "UNIT_SPELLCAST_CHANNEL_STOP" then
         SpellEvent(event, ...)
     elseif event == "CHAT_MSG_ADDON" then
@@ -471,7 +528,7 @@ for _, event in ipairs({"ADDON_LOADED", "PLAYER_ENTERING_WORLD", "BAG_UPDATE_DEL
     "TRADE_CLOSED", "TRADE_REQUEST_CANCEL", "UI_INFO_MESSAGE"}) do
     frame:RegisterEvent(event)
 end
-for _, event in ipairs({"UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED",
+for _, event in ipairs({"UNIT_PET", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED",
     "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_STOP"}) do
     frame:RegisterUnitEvent(event, "player")
 end

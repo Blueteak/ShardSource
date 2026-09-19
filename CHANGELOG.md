@@ -1,3 +1,8 @@
+# Unreleased
+
+- Shows the soul used to summon your current demon in its mouseover tooltip, replacing the owner line.
+- Remembers the source across UI reloads for the same summoned demon.
+
 # 2.0.0
 
 Adds support for WoW Forever 1.60.1, interface 16001.
