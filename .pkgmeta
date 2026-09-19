@@ -1,0 +1,15 @@
+package-as: ShardSource
+enable-nolib-creation: no
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+# CurseForge supplies the license selected on the project page.
+license-output: LICENSE.txt
+
+# Dotfiles and this configuration are already excluded by the packager.
+ignore:
+  - README.md
+  - RELEASING.md
+  - AGENTS.md

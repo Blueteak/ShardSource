@@ -25,3 +25,7 @@ Toggles the public emoting part of the addon for summoning players/demons and us
 
 ```/ssrc debug```
 Toggles logging of shard-based actions, useful for debugging
+
+## Publishing
+
+CurseForge packages this repository using `.pkgmeta` and Git version tags. See [RELEASING.md](RELEASING.md) for setup and publishing instructions.

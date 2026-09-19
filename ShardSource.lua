@@ -1,4 +1,6 @@
 local addonName = ...
+local addonVersion = C_AddOns.GetAddOnMetadata(addonName, "Version")
+if not addonVersion or addonVersion:find("@", 1, true) then addonVersion = "development" end
 local frame = CreateFrame("Frame")
 local SHARD_ID, PREFIX, UNKNOWN_SOUL = 6265, "ShardSrc", "Unknown"
 local ready, bankOpen, scanQueued = false, false, false
@@ -410,7 +412,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, ItemTooltip)
         InitSpells()
         ready = true
-        print("Loaded |cffa335ee[ShardSource]|r 2.0 for WoW Forever.")
+        print("Loaded |cffa335ee[ShardSource]|r " .. addonVersion .. " for WoW Forever.")
     elseif not ready then
         return
     elseif event == "PLAYER_ENTERING_WORLD" then
@@ -491,7 +493,7 @@ SlashCmdList.SHARDSOURCE = function(message)
             count = count+1
             if entry.source ~= UNKNOWN_SOUL then known = known+1 end
         end
-        print("ShardSource 2.0 | WoW " .. version .. " / " .. build .. " / interface " .. interface)
+        print("ShardSource " .. addonVersion .. " | WoW " .. version .. " / " .. build .. " / interface " .. interface)
         print("Shards in bags: " .. count .. "; named: " .. known .. ".")
         print(lastSourceStatus)
         print(lastShardStatus)
