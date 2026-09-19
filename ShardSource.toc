@@ -1,9 +1,8 @@
-## Interface: 20501
-## Version: 1.0
+## Interface: 16001
+## Version: 2.0
 ## Title: Shard Source
-## Notes: Displays source of Soul Shards
+## Notes: Tracks readable Soul Shard sources in WoW Forever
 ## Author: Blueteak
 ## SavedVariablesPerCharacter: Shards
 
 ShardSource.lua
-ShardSource.xml
