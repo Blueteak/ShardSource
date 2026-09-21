@@ -1,4 +1,4 @@
-# Unreleased
+# 2.0.1
 
 - Shows the soul used to summon your current demon in its mouseover tooltip, replacing the owner line.
 - Remembers the source across UI reloads for the same summoned demon.
