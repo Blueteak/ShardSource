@@ -1,3 +1,13 @@
+# 2.0.2
+
+- Attempts to recover restricted soul names through a marked self-whisper when a shard appears, with one request per Drain Soul capture.
+- Matches replies to their original capture and retries restricted chat-history lookups for up to sixty seconds.
+- Hides marked self-whispers from normal chat where the client permits filtering.
+- Preserves unresolved sources with readable creature identities across reloads for later recovery.
+- Adds target and chat probes and expands recovery diagnostics in `/ssrc status`.
+
+Soul-name recovery remains experimental on the Forever beta and depends on the client's chat restrictions and saved-data loading.
+
 # 2.0.1
 
 - Shows the soul used to summon your current demon in its mouseover tooltip, replacing the owner line.
