@@ -1,3 +1,10 @@
+# 2.0.3
+
+- Request unreadable names at Drain Soul channel start, before death or target clearing can prevent the self-whisper.
+- Save readable names directly and use self-whispers for all unreadable names.
+- Remove temporary restricted names and creature-GUID recovery. Pending replies still follow souls into stones, demons, and returned shards; failed replies leave Unknown Soul.
+- Confirmed in-game that a resolved name survives a reload inside a dungeon.
+
 # 2.0.2
 
 - Attempts to recover restricted soul names through a marked self-whisper when a shard appears, with one request per Drain Soul capture.

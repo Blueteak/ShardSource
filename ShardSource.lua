@@ -1,7 +1,7 @@
 local addonName = ...
 local addonVersion = C_AddOns.GetAddOnMetadata(addonName, "Version")
 if not addonVersion or addonVersion:find("@", 1, true) then addonVersion = "development" end
-local TRACKING_REVISION = "2026-10-08.9"
+local TRACKING_REVISION = "2026-11-08.2"
 local frame = CreateFrame("Frame")
 local SHARD_ID, PREFIX, UNKNOWN_SOUL = 6265, "ShardSrc", "Unknown"
 local ready, bankOpen, scanQueued = false, false, false
@@ -14,14 +14,10 @@ local REFUND_WINDOW = 3
 local lastSourceStatus = "No Drain Soul observed yet."
 local lastShardStatus = "No new shard observed yet."
 local lastSpellStatus = "No restricted spell events observed."
-local lastRecoveryStatus = "No delayed name lookup attempted."
-local lastDisplayStatus = "No temporary soul name displayed yet."
--- These records may hold opaque names/GUIDs. Never put them in saved variables.
+-- Shared pending replies follow shards into stones, demons, and returned shards.
 local sessionSouls, healthSoul, stoneSoul, demonSoul = {}, nil, nil, nil
-local recoveryQueued = false
+local whisperRefreshQueued = false
 local loadedSourceStatus
-local loadedRecoveryCount = 0
-local lastIdentityStatus = "No identity recovery probe attempted."
 local chatProbe, chatProbeExpires
 local whisperRequests, whisperSequence = {}, 0
 local whisperLines, targetRevision = {}, 0
@@ -37,7 +33,7 @@ local soulstones = { [5232]=true, [16892]=true, [16893]=true, [16895]=true,
     [16896]=true, [22116]=true }
 local colors = { [0]="9d9d9d", "ffffff", "1eff00", "0070dd", "a335ee", "ff8000", "e6cc80" }
 
--- Secret values stay opaque in session records and go only to supported APIs.
+-- Check restricted API values before reading them.
 local function Readable(value)
     return not issecretvalue(value)
 end
@@ -142,7 +138,7 @@ local function RequestSoulWhisper(soul)
     if soul.whisperRequested then return end
     soul.whisperRequested = true
     if soul.targetRevision ~= targetRevision then
-        lastWhisperStatus = "Soul-name whisper skipped: target changed before the shard appeared."
+        lastWhisperStatus = "Soul-name whisper skipped: target changed before the name request."
         return
     end
     local recipient, playerGUID = PlayerWhisperName(), UnitGUID("player")
@@ -150,9 +146,8 @@ local function RequestSoulWhisper(soul)
         lastWhisperStatus = "Soul-name whisper skipped: full player identity unavailable."
         return
     end
-    -- Send when the shard appears, while the capture's target is still selected.
-    -- Never retry a send later
-    -- with a different target. Let the client decide whether combat chat is allowed.
+    -- Request at channel start, before death or target clearing can precede the shard.
+    -- Never retry against a different target; let the client decide whether chat is allowed.
     whisperSequence = whisperSequence+1
     local token = tostring(GetTime()) .. ":" .. whisperSequence
     local request = { soul=soul, playerGUID=playerGUID }
@@ -210,15 +205,6 @@ local function ReportChatProbe()
     end
 end
 
-local function SaveRecovery(guid, soul)
-    -- Copy only readable identity/metadata, never the opaque session record.
-    if soul and soul.source == UNKNOWN_SOUL and PlainString(soul.guid) and PlainString(soul.details) then
-        Shards.pendingSources[guid] = { guid=soul.guid, details=soul.details }
-    else
-        Shards.pendingSources[guid] = nil
-    end
-end
-
 local function SavedSourceStatus()
     local count, known = 0, 0
     for _, source in pairs(Shards.sources) do
@@ -230,7 +216,6 @@ end
 
 local function ReadTargetSoul()
     local name = UnitName("target")
-    local guid = UnitGUID("target")
     local level, playerLevel = UnitLevel("target"), UnitLevel("player")
     local isPlayer, rank = UnitIsPlayer("target"), UnitClassification("target")
     -- Missing quality metadata must not discard a readable soul name.
@@ -247,18 +232,8 @@ local function ReadTargetSoul()
     local details = table.concat({kind, delta or "", rank, level or ""}, "_")
     if not ValidSoulName(name) then
         local soul = { source=UNKNOWN_SOUL, details=details,
-            quality=Quality(UNKNOWN_SOUL .. "_" .. details),
-            hasName=not Readable(name), hasGUID=not Readable(guid) or PlainString(guid),
-            targetRevision=targetRevision }
-        -- Do not branch on, concatenate, or use a protected name/GUID as a key.
-        if soul.hasName then soul.name = name end
-        if soul.hasGUID then soul.guid = guid end
-        lastSourceStatus = soul.hasName and "Restricted Drain Soul name kept for this session."
-            or "Drain Soul name unavailable; saved creature identity for a later lookup."
-        if not soul.hasName and not soul.hasGUID then
-            lastSourceStatus = "Drain Soul target name and identity were unavailable."
-            return UNKNOWN_SOUL
-        end
+            quality=Quality(UNKNOWN_SOUL .. "_" .. details), targetRevision=targetRevision }
+        lastSourceStatus = "Drain Soul name unavailable; awaiting a self-whisper at channel start."
         return UNKNOWN_SOUL, soul
     end
     -- Preserve the original saved-data / addon-message format.
@@ -342,7 +317,6 @@ local function ResolveConsumption(current)
     if pendingAction and recentLoss and not bankOpen and not GetCursorInfo() then
         ApplyAction(pendingAction, recentLoss.source, recentLoss.soul)
         Shards.sources[recentLoss.guid] = nil
-        Shards.pendingSources[recentLoss.guid] = nil
         sessionSouls[recentLoss.guid] = nil
         pendingAction, recentLoss = nil, nil
     end
@@ -369,12 +343,11 @@ local function ResolveDemonRefund(carried)
         local source = RecordedSource(demonRefund.source, soul)
         Shards.sources[candidate], carried[candidate].source = source, source
         sessionSouls[candidate], carried[candidate].soul = soul, soul
-        SaveRecovery(candidate, soul)
         if Shards.demon and Shards.demon.guid == demonRefund.guid then
             Shards.demon, demonSoul = nil, nil
         end
         demonRefund, recentGains = nil, {}
-        lastShardStatus = soul and source == UNKNOWN_SOUL and "Returned shard kept the demon's temporary soul record."
+        lastShardStatus = soul and source == UNKNOWN_SOUL and "Returned shard kept the demon's pending whisper record."
             or "Returned shard matched to summoned demon: " .. SoulName(source)
         Debug(lastShardStatus)
     end
@@ -410,15 +383,12 @@ local function ScanInventory()
                             source = RecordedSource(drain.source, drain.soul)
                             sessionSouls[guid] = drain.soul
                             lastShardStatus = drain.soul and source == UNKNOWN_SOUL
-                                and "New shard matched to Drain Soul; temporary name/recovery record attached."
+                                and "New shard matched to Drain Soul; pending whisper record attached."
                                 or source == UNKNOWN_SOUL
                                 and "New shard matched to Drain Soul, but " .. drain.reason
                                 or "New shard matched to Drain Soul: " .. SoulName(source)
                             -- Multiple shards can arrive in one update or later in
                             -- the same channel. Keep their shared source until expiry.
-                            if drain.soul and source == UNKNOWN_SOUL and not Readable(drain.soul.guid) then
-                                RequestSoulWhisper(drain.soul)
-                            end
                         elseif not isBank then
                             lastShardStatus = "New shard had no matching Drain Soul channel."
                             if inventoryReady and source == UNKNOWN_SOUL and not bankOpen and not GetCursorInfo() then
@@ -428,7 +398,6 @@ local function ScanInventory()
                         end
                         if not isBank then Debug(lastShardStatus) end
                         Shards.sources[guid] = source
-                        SaveRecovery(guid, sessionSouls[guid])
                     end
                     current[guid] = { source=source, soul=sessionSouls[guid], bag=bag, slot=slot }
                     if not isBank then carried[guid] = current[guid] end
@@ -520,7 +489,7 @@ local function RefreshBags()
     end
 end
 
-local function RecoverSouls()
+local function ResolveSoulWhispers()
     -- Combat can restrict the whisper event even after the send succeeds. Retain
     -- readable line IDs and re-read both text and sender when restrictions lift.
     for lineID, expires in pairs(whisperLines) do
@@ -535,74 +504,23 @@ local function RecoverSouls()
             end
         end
     end
-    local checked, recovered, restricted, unavailable, failed = {}, 0, 0, 0, 0
-    local savedShards = 0
-    local function Recover(soul)
-        if not soul or soul.source ~= UNKNOWN_SOUL or checked[soul] then return end
-        checked[soul] = true
-        if not soul.hasGUID or not UnitNameFromGUID then
-            lastIdentityStatus = "Recovery probe: stored name=" .. IdentityState(soul.name)
-                .. "; stored GUID=" .. IdentityState(soul.guid) .. "; lookup unavailable."
-            unavailable = unavailable+1
-            return
-        end
-        -- A fresh lookup for the original creature only. Never re-read today's target.
-        local ok, name = pcall(UnitNameFromGUID, soul.guid)
-        lastIdentityStatus = "Recovery probe: stored name=" .. IdentityState(soul.name)
-            .. "; stored GUID=" .. IdentityState(soul.guid)
-            .. "; fresh name=" .. (ok and IdentityState(name) or "lookup error") .. "."
-        if not ok then
-            failed = failed+1
-        elseif not Readable(name) then
-            restricted = restricted+1
-            if not soul.hasName then soul.name, soul.hasName = name, true end
-        elseif ValidSoulName(name) then
-            local source = name:gsub("[_:|]", "") .. "_" .. soul.details
-            if PlainString(source) then
-                soul.source = source
-                soul.name, soul.guid, soul.hasName, soul.hasGUID = nil, nil, false, false
-                recovered = recovered+1
-            else
-                restricted = restricted+1
-            end
-        else
-            unavailable = unavailable+1
-        end
-    end
     local function UpdateEntry(entry)
         if entry then
-            Recover(entry.soul)
             entry.source = RecordedSource(entry.source, entry.soul)
         end
     end
     for guid, soul in pairs(sessionSouls) do
-        Recover(soul)
         local source = RecordedSource(Shards.sources[guid], soul)
-        -- A readable session record is enough to restore its saved entry, even if
-        -- that entry is missing. Count the write separately from the name lookup.
         if PlainString(source) and source ~= UNKNOWN_SOUL then
-            if Shards.sources[guid] ~= source then savedShards = savedShards+1 end
             Shards.sources[guid] = source
         end
         UpdateEntry(inventory[guid])
-        SaveRecovery(guid, soul)
     end
-    Recover(healthSoul)
-    Recover(stoneSoul)
-    Recover(demonSoul)
     Shards.healthStoneSrc = RecordedSource(Shards.healthStoneSrc, healthSoul)
     Shards.soulStoneSrc = RecordedSource(Shards.soulStoneSrc, stoneSoul)
     if Shards.demon then Shards.demon.source = RecordedSource(Shards.demon.source, demonSoul) end
     for _, entry in pairs({pendingDemon, observedDemon, demonRefund, recentLoss, drain, sentCast}) do
         UpdateEntry(entry)
-    end
-    if next(checked) or savedShards > 0 then
-        lastRecoveryStatus = "Delayed names: " .. recovered .. " recovered; " .. restricted
-            .. " still restricted; " .. unavailable .. " unavailable; " .. failed .. " lookup errors; "
-            .. savedShards .. " shard records updated."
-        Shards.lastRecoveryStatus = lastRecoveryStatus
-        Debug(lastRecoveryStatus)
-        return lastRecoveryStatus
     end
 end
 
@@ -621,11 +539,10 @@ ReceiveSoulWhisper = function(text, senderGUID, deferRefresh)
     local soul = request.soul
     if soul.source == UNKNOWN_SOUL then
         soul.source = name:gsub("[_:]", "") .. "_" .. soul.details
-        soul.name, soul.guid, soul.hasName, soul.hasGUID = nil, nil, false, false
         -- The same soul object follows the shard into stones/demons, so replies
         -- arriving before or after the bag update resolve the original capture.
         if not deferRefresh then
-            RecoverSouls()
+            ResolveSoulWhispers()
             RefreshBags()
         end
     end
@@ -634,14 +551,14 @@ ReceiveSoulWhisper = function(text, senderGUID, deferRefresh)
     return true
 end
 
-local function QueueRecovery()
-    if recoveryQueued or not ready then return end
-    recoveryQueued = true
+local function QueueWhisperRefresh()
+    if whisperRefreshQueued or not ready then return end
+    whisperRefreshQueued = true
     -- Restriction changes are announced before activation/after deactivation.
     -- Let the event finish before trying the lookup, including on zone changes.
     C_Timer.After(0.5, function()
-        recoveryQueued = false
-        RecoverSouls()
+        whisperRefreshQueued = false
+        ResolveSoulWhispers()
         RefreshBags()
     end)
 end
@@ -654,7 +571,7 @@ local function QueueScan()
         scanQueued = false
         ScanInventory()
         RefreshBags()
-        QueueRecovery()
+        QueueWhisperRefresh()
     end)
 end
 
@@ -672,28 +589,6 @@ local function TooltipSource(tooltip, data)
     end
 end
 
-local function SetSoulText(label, fallback, soul, format)
-    if soul and soul.source == UNKNOWN_SOUL and soul.hasName then
-        -- SetFormattedText is an allowed display sink. Lua must not format this name.
-        local ok = pcall(label.SetFormattedText, label, format, soul.name)
-        if ok then
-            lastDisplayStatus = "Temporary soul name passed to the tooltip renderer."
-            return
-        end
-        lastDisplayStatus = "WoW rejected temporary name display; normal label used."
-    end
-    label:SetText(fallback)
-end
-
-local function AddSoulLine(tooltip, fallback, soul, format)
-    tooltip:AddLine(fallback, 1, 1, 1)
-    local name, line = tooltip:GetName(), tooltip:NumLines()
-    if PlainString(name) and Readable(line) and type(line) == "number" then
-        local label = _G[name .. "TextLeft" .. line]
-        if label then SetSoulText(label, fallback, soul, format) end
-    end
-end
-
 local function ItemTooltip(tooltip, data)
     if not ready or tooltip:IsForbidden() or not ReadableTable(data) or not Readable(data.id) then return end
     if not C_RestrictedActions.CheckAllowProtectedFunctions(tooltip, true) then return end
@@ -705,11 +600,11 @@ local function ItemTooltip(tooltip, data)
         local title = name and _G[name .. "TextLeft1"]
         local text = source == UNKNOWN_SOUL and "Unknown Soul" or SoulName(source) .. "'s Soul"
         if title then
-            SetSoulText(title, text:sub(1, 1):upper() .. text:sub(2), soul, "%s's Soul")
+            title:SetText(text:sub(1, 1):upper() .. text:sub(2))
             local r, g, b = C_Item.GetItemQualityColor(soul and soul.quality or Quality(source))
             title:SetTextColor(r, g, b)
         else
-            AddSoulLine(tooltip, text, soul, "%s's Soul")
+            tooltip:AddLine(text, 1, 1, 1)
         end
     elseif healthstones[id] then
         source = Shards.healthStoneSrc
@@ -721,8 +616,7 @@ local function ItemTooltip(tooltip, data)
         return
     end
     if id ~= SHARD_ID then
-        AddSoulLine(tooltip, "Soul of " .. ColoredSoul(source), soul,
-            "Soul of |cff" .. colors[soul and soul.quality or Quality(source)] .. "%s|r")
+        tooltip:AddLine("Soul of " .. ColoredSoul(source), 1, 1, 1)
     end
     if soul and source == UNKNOWN_SOUL then source = UNKNOWN_SOUL .. "_" .. soul.details end
     local _, kind, _, class, level = SourceParts(source)
@@ -741,16 +635,15 @@ local function DemonTooltip(tooltip, data)
     if not ReadableTable(data.lines) then return end
     local text = demon.source == UNKNOWN_SOUL and "<Summoned from an unknown soul>"
         or "<Summoned from " .. ColoredSoul(demon.source) .. "'s soul>"
-    local format = "<Summoned from |cff" .. colors[demonSoul and demonSoul.quality or Quality(demon.source)] .. "%s|r's soul>"
     local name = tooltip:GetName()
     for _, line in ipairs(data.lines) do
         if ReadableTable(line) and Readable(line.type) and line.type == Enum.TooltipDataLineType.UnitOwner
             and Readable(line.lineIndex) and type(line.lineIndex) == "number" then
             local label = name and _G[name .. "TextLeft" .. line.lineIndex]
-            if label then SetSoulText(label, text, demonSoul, format); return end
+            if label then label:SetText(text); return end
         end
     end
-    AddSoulLine(tooltip, text, demonSoul, format)
+    tooltip:AddLine(text, 1, 1, 1)
 end
 
 local function SpellEvent(event, unit, castGUID, spellID)
@@ -784,6 +677,7 @@ local function SpellEvent(event, unit, castGUID, spellID)
             end
             drain = { source=source, soul=soul, reason=lastSourceStatus,
                 castGUID=PlainString(castGUID) and castGUID or nil, expires=GetTime()+20 }
+            if soul and source == UNKNOWN_SOUL then RequestSoulWhisper(soul) end
             Debug(lastSourceStatus)
         elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" and drain
             and (not drain.castGUID or not PlainString(castGUID) or drain.castGUID == castGUID) then
@@ -858,17 +752,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
         if ... ~= addonName then return end
         Shards = type(Shards) == "table" and Shards or {}
         Shards.sources = type(Shards.sources) == "table" and Shards.sources or {}
-        Shards.pendingSources = ReadableTable(Shards.pendingSources) and Shards.pendingSources or {}
-        for guid, entry in pairs(Shards.pendingSources) do
-            if PlainString(guid) and ReadableTable(entry) and PlainString(entry.guid)
-                and PlainString(entry.details) and Shards.sources[guid] == UNKNOWN_SOUL then
-                sessionSouls[guid] = { source=UNKNOWN_SOUL, guid=entry.guid, details=entry.details,
-                    hasGUID=true, hasName=false, quality=Quality(UNKNOWN_SOUL .. "_" .. entry.details) }
-                loadedRecoveryCount = loadedRecoveryCount+1
-            else
-                Shards.pendingSources[guid] = nil
-            end
-        end
+        -- Retire legacy creature-identity recovery without touching saved names.
+        Shards.pendingSources, Shards.lastRecoveryStatus, Shards.logoutRecovery = nil, nil, nil
         loadedSourceStatus = SavedSourceStatus()
         if Shards.UseEmotes == nil then Shards.UseEmotes = true end
         Shards.healthStoneSrc = PlainString(Shards.healthStoneSrc) and Shards.healthStoneSrc or UNKNOWN_SOUL
@@ -893,7 +778,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
         return
     elseif event == "PLAYER_LOGOUT" then
         -- Saved variables are written immediately afterward; timers cannot help here.
-        Shards.logoutRecovery = RecoverSouls() or "No unresolved names at logout."
+        ResolveSoulWhispers()
         Shards.logoutSources = SavedSourceStatus()
         Shards.logoutRevision = TRACKING_REVISION
     elseif event == "PLAYER_ENTERING_WORLD" then
@@ -904,13 +789,13 @@ frame:SetScript("OnEvent", function(_, event, ...)
         inventory = {}
         ScanInventory()
         RefreshBags()
-        QueueRecovery()
+        QueueWhisperRefresh()
     elseif event == "PLAYER_TARGET_CHANGED" then
         targetRevision = targetRevision+1
     elseif event == "BAG_UPDATE_DELAYED" or event == "PLAYER_REGEN_ENABLED" then
         QueueScan()
     elseif event == "ADDON_RESTRICTION_STATE_CHANGED" then
-        QueueRecovery()
+        QueueWhisperRefresh()
     elseif event == "BANKFRAME_OPENED" then
         bankOpen = true
         demonRefund, recentGains = nil, {}
@@ -1022,9 +907,9 @@ SlashCmdList.SHARDSOURCE = function(message)
         Shards.debug = not Shards.debug
         print("ShardSource debug: " .. (Shards.debug and "on" or "off"))
     elseif message == "retry" then
-        RecoverSouls()
+        ResolveSoulWhispers()
         RefreshBags()
-        print(lastRecoveryStatus)
+        print(lastWhisperStatus)
     elseif message == "chatprobe arm" then
         if ArmChatProbe() then
             print("ShardSource: next incoming whisper will be captured for this probe. Send yourself SSRC:%t within 60 seconds.")
@@ -1097,33 +982,17 @@ SlashCmdList.SHARDSOURCE = function(message)
             end
         end
     elseif message == "status" then
-        local count, known, temporary = 0, 0, 0
-        local secretNames, secretGUIDs, readableGUIDs, missingGUIDs, pending = 0, 0, 0, 0, 0
-        for _ in pairs(Shards.pendingSources) do pending = pending+1 end
+        local count, known, pending = 0, 0, 0
+        for _ in pairs(whisperRequests) do pending = pending+1 end
         for _, entry in pairs(inventory) do
             count = count+1
-            if entry.source ~= UNKNOWN_SOUL then
-                known = known+1
-            elseif entry.soul and entry.soul.hasName then
-                temporary = temporary+1
-            end
-            local soul = entry.soul
-            if soul and soul.source == UNKNOWN_SOUL then
-                if not Readable(soul.name) then secretNames = secretNames+1 end
-                if not Readable(soul.guid) then secretGUIDs = secretGUIDs+1
-                elseif PlainString(soul.guid) then readableGUIDs = readableGUIDs+1
-                else missingGUIDs = missingGUIDs+1 end
-            end
+            if entry.source ~= UNKNOWN_SOUL then known = known+1 end
         end
         print("ShardSource tracker " .. TRACKING_REVISION)
-        print("Shards in bags: " .. count .. "; saved names: " .. known .. "; session-only names: " .. temporary .. ".")
+        print("Shards in bags: " .. count .. "; saved names: " .. known .. "; unknown: " .. (count-known) .. ".")
         print("Loaded from disk: " .. loadedSourceStatus .. "; saved table now: " .. SavedSourceStatus() .. ".")
-        print("Unresolved bag identities: " .. secretNames .. " secret names; GUIDs: " .. readableGUIDs
-            .. " readable / " .. secretGUIDs .. " secret / " .. missingGUIDs .. " missing.")
-        print("Persistent recovery: " .. loadedRecoveryCount .. " loaded; " .. pending .. " pending records now.")
-        print(lastIdentityStatus)
+        print("Pending self-whispers: " .. pending .. ".")
         print(lastShardStatus)
-        print(lastRecoveryStatus)
         print(lastWhisperStatus)
     elseif message == "testhealth" then
         print("ShardSource: healthstone soul is " .. ColoredSoul(Shards.healthStoneSrc) .. ".")

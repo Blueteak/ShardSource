@@ -7,12 +7,12 @@ Shard Source is an addon for tracking the source of Warlock Soul Shards. No long
 
 ### Soul Shard Names
 
-When a new shard matches a Drain Soul capture with an unreadable name and secret creature GUID, ShardSource tries one self-whisper containing `%t` for that capture. All shards generated during the same channel share its soul record. WoW expands the target name, and a readable reply from your own player GUID resolves that record. Each cast has its own request token, so replies can arrive in any order. Restricted replies with readable chat-line IDs are queried again after combat or restriction changes, for up to sixty seconds. If the target changed before the shard appeared, the addon skips the whisper to avoid naming it after the wrong target. Blocked sends or unrecoverable replies leave the temporary-name recovery in place. This fallback is experimental in combat. `/ssrc status` includes its latest result.
+Readable mob names are saved directly. For any unreadable name, starting a Drain Soul channel triggers one self-whisper containing `%t`, before the target can die or be cleared. All shards from that channel share a pending record, which follows the soul into stones, demons, and returned shards. A readable reply from your own player GUID saves the name. Request tokens keep replies matched to the right capture. Restricted replies with readable chat-line IDs are retried for up to sixty seconds. If the target changed between capture and the name request, the whisper is skipped. Failed or unresolved whispers leave Unknown Soul. `/ssrc status` shows the latest result.
 ![](https://i.imgur.com/gRUvWG4.png)
 
 Each soul shard you collect will retain information about what enemy it came from, color-coded to how powerful the enemy was. Ordinary creatures four or more levels below you are poor quality souls. Elite and rare-elite souls stay green when below your level, same-level player souls are epic, and boss souls are legendary!
 
-When WoW restricts a creature's name, the addon keeps it temporarily for tooltip display and retries a lookup for that same creature after bag updates, combat, restriction changes, and zone changes. A readable result becomes a saved name. Temporary names follow the soul into your demon, returned shard, Healthstone, or Soulstone, but cannot be shared through chat and are lost on reload/logout unless recovered first. Recovered names still depend on the client loading saved data correctly. This recovery is experimental on the Forever beta; the game may continue restricting the name or stop knowing the creature.
+Restricted names and creature GUIDs are no longer retained for tooltip display or later lookup. Pending whispers do not survive reloads; successfully saved names do, subject to the beta loading issue above.
 
 ### Consumable Source
 
@@ -39,12 +39,10 @@ Toggles the public emoting part of the addon for summoning players/demons and us
 Toggles logging of shard-based actions, useful for debugging
 
 ```/ssrc status```
-Shows shard name counts, loaded/current saved records, and the latest shard match and recovery result. Identity diagnostics distinguish secret names, readable/secret/missing creature GUIDs, and the fresh name lookup result.
-
-Unresolved shards with readable creature GUIDs retain recovery records across reloads, subject to the client loading saved data correctly. Status reports how many recovery records loaded and how many remain pending. Secret names and GUIDs remain session-only. A retained GUID allows another lookup attempt; it does not guarantee that the client will return a readable name.
+Shows shard name counts, loaded/current saved records, pending self-whispers, and the latest shard match and whisper result.
 
 ```/ssrc retry```
-Retries unresolved names using their original creature identities and reports the result. Useful after leaving a dungeon, before reloading.
+Rechecks retained whisper replies in chat history. It does not send another whisper or look up creature identities.
 
 ```/ssrc probe```
 Checks whether the current target's name, GUID, and a fresh name lookup by GUID are readable, secret, or missing. Also checks `UnitCreatureID` and the target tooltip's GUID, title, and name lookup, reporting unavailable APIs or lookup errors separately. When out of combat and addon chat is allowed, it sends one `SSRC:%t` whisper to yourself and arms the chat probe to test target-name expansion through the addon API. It does not change shard records. Target a living dungeon enemy before anyone pulls and run this command. Compare with an outdoor enemy.
