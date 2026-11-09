@@ -8,6 +8,7 @@ local ready, bankOpen, scanQueued = false, false, false
 local inventory, drain, pendingAction, recentLoss, sentCast = {}, nil, nil, nil, nil
 local trade, lastTrade = nil, nil
 local pendingDemon
+local nextOutdoorEmote = 0
 local observedDemon, demonRefund
 local recentGains, inventoryReady = {}, false
 local REFUND_WINDOW = 3
@@ -24,6 +25,7 @@ local whisperLines, targetRevision = {}, 0
 local ReceiveSoulWhisper
 local lastWhisperStatus = "No soul-name self-whisper attempted."
 local spellActions = {}
+local demonTypes = {}
 local hookedContainers = setmetatable({}, { __mode = "k" })
 
 local healthstones = { [5512]=true, [5511]=true, [5509]=true, [5510]=true, [9421]=true,
@@ -251,7 +253,64 @@ local function InitSpells()
         local name = C_Spell.GetSpellName(id)
         if PlainString(name) then spellActions[name] = action end
     end
+    for id, demonType in pairs({ [697]="Voidwalker", [712]="Succubus", [691]="Felhunter", [30146]="Felguard" }) do
+        local name = C_Spell.GetSpellName(id)
+        if PlainString(name) then demonTypes[name] = demonType end
+    end
 end
+
+local function OutdoorSummonEmote(kind, spell, target)
+    if not Shards.UseEmotes or not ChatAllowed() or GetTime() < nextOutdoorEmote then return end
+    -- Predict only the announcement. Actual consumption still determines saved sources.
+    for bag = 0, NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS do
+        for slot = 1, C_Container.GetContainerNumSlots(bag) do
+            local itemID = C_Container.GetContainerItemID(bag, slot)
+            if Readable(itemID) and itemID == SHARD_ID then
+                local guid = ItemGUID(bag, slot)
+                local source = guid and RecordedSource(Shards.sources[guid], sessionSouls[guid]) or UNKNOWN_SOUL
+                nextOutdoorEmote = GetTime()+10
+                if kind == "summon" then
+                    Emote("begins summoning " .. (target or "a player") .. " using the soul of " .. SoulName(source) .. ".")
+                else
+                    Emote("begins summoning a " .. (demonTypes[spell] or "demon") .. " using the soul of " .. SoulName(source) .. ".")
+                end
+                return
+            end
+        end
+    end
+end
+
+local function SummonAbilityPressed(spellID)
+    if not ready or not Readable(spellID) or type(spellID) ~= "number" or IsInInstance() then return end
+    local spell = C_Spell.GetSpellName(spellID)
+    if not PlainString(spell) then return end
+    local kind = spellActions[spell]
+    if kind ~= "demon" and kind ~= "summon" then return end
+    local target = kind == "summon" and GetUnitName("target", true)
+    -- Send synchronously from the action press. Events and timers lose its
+    -- hardware-input context. The shared cooldown also deduplicates nested hooks.
+    OutdoorSummonEmote(kind, spell, PlainString(target) and target or nil)
+end
+
+if UseAction then
+    hooksecurefunc("UseAction", function(slot)
+        if not ready or not Readable(slot) or type(slot) ~= "number" then return end
+        local spellID = C_ActionBar and C_ActionBar.GetSpell and C_ActionBar.GetSpell(slot)
+        if Readable(spellID) and type(spellID) == "number" then
+            SummonAbilityPressed(spellID)
+            return
+        end
+        local actionType, id = GetActionInfo(slot)
+        if not PlainString(actionType) or not Readable(id) or type(id) ~= "number" then return end
+        if actionType == "spell" then
+            SummonAbilityPressed(id)
+        elseif actionType == "macro" and GetMacroSpell then
+            SummonAbilityPressed(GetMacroSpell(id))
+        end
+    end)
+end
+if CastSpellByID then hooksecurefunc("CastSpellByID", SummonAbilityPressed) end
+if C_Spell.CastSpell then hooksecurefunc(C_Spell, "CastSpell", SummonAbilityPressed) end
 
 local function BindDemonSource()
     if not pendingDemon then return end
@@ -298,9 +357,13 @@ local function ApplyAction(action, source, soul)
             pendingDemon = { source=source, soul=soul, previousGUID=action.petGUID, expires=GetTime()+2 }
             BindDemonSource()
         end
-        Emote("used the soul of " .. SoulName(source) .. " to cast " .. action.spell .. ".")
+        if not action.startEmote then
+            Emote("used the soul of " .. SoulName(source) .. " to cast " .. action.spell .. ".")
+        end
     elseif action.kind == "summon" then
-        Emote("began summoning " .. (action.target or "a player") .. " using the soul of " .. SoulName(source) .. ".")
+        if not action.startEmote then
+            Emote("began summoning " .. (action.target or "a player") .. " using the soul of " .. SoulName(source) .. ".")
+        end
         SendSource("Smmn", source, action.target)
     elseif action.kind == "shatter" then
         Emote("shattered the soul of " .. SoulName(source) .. ", fading into the background.")
@@ -702,6 +765,9 @@ local function SpellEvent(event, unit, castGUID, spellID)
             pendingAction, recentLoss = nil, nil
         else
             pendingAction = { kind=kind, spell=spellName, target=target, petGUID=petGUID, expires=GetTime()+2 }
+            -- Outdoors only the input hooks may announce, including when throttled.
+            pendingAction.startEmote = (kind == "demon" or kind == "summon")
+                and (not IsInInstance() or (sentCast and sentCast.startEmote))
             -- A new stone must not inherit an older stone's source if attribution fails.
             if kind == "health" then Shards.healthStoneSrc, healthSoul = UNKNOWN_SOUL, nil end
             if kind == "soul" then Shards.soulStoneSrc, stoneSoul = UNKNOWN_SOUL, nil end
@@ -810,7 +876,8 @@ frame:SetScript("OnEvent", function(_, event, ...)
             sentCast = nil
             if PlainString(guid) then
                 local petGUID = UnitGUID("pet")
-                sentCast = { target=PlainString(target) and target or nil, guid=guid, expires=GetTime()+30 }
+                sentCast = { target=PlainString(target) and target or nil, guid=guid,
+                    expires=GetTime()+30, startEmote=not IsInInstance() }
                 -- false means no previous pet; nil means its identity was unavailable.
                 if Readable(petGUID) and (petGUID == nil or PlainString(petGUID)) then
                     sentCast.petGUID = petGUID or false

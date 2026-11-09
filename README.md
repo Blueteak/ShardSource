@@ -21,6 +21,8 @@ ShardSource filters its marked self-whispers from the normal chat display, inclu
 
 Crafted Healthstones and Soulstones will keep a reference to what Soul was used to create them. Additionally summoning demons or other players will emote publicly what soul was used to summon them.
 
+Outside instances, demon and player summons attempt their emote directly from ability-press hooks, with a shared 10-second cooldown. The announced soul is predicted from the first shard in bag/slot order; actual consumed shards still determine saved sources. Failed or cancelled casts can therefore announce without consuming a shard. Player-summon announcements use your current target. Inside instances, announcements still follow consumption. The outdoor input hooks need in-game verification with your action bars and bindings.
+
 Your summoned demon's mouseover tooltip replaces the owner line with `<Summoned from Hogger's soul>`, using the consumed soul's name and quality color. This is visible only to you and starts with your next tracked summon. Readable sources are saved for reuse with the same demon after a UI reload, subject to the beta loading issue above. Imps do not consume a shard and keep their normal tooltip.
 
 If a tracked demon despawns and returns a Soul Shard, that shard keeps the demon's original soul name and quality. The addon matches a single new, unidentified shard arriving around the disappearance; ambiguous returns stay unknown.
